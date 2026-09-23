@@ -15,7 +15,7 @@ The app shows a configuration-required screen until both variables are present. 
 
 ## Deploy on GitHub Pages
 
-The target repository is [AdventureLuna/LunasStorage](https://github.com/AdventureLuna/LunasStorage). Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The included workflow builds with `/LunasStorage/` as Vite's base for project Pages and deploys on pushes to `main`. No Supabase secret is required in GitHub Actions. For a user/organization root Pages site, adjust `vite.config.ts` base to `/`.
+The target repository is [AdventureLuna/LunasStorage](https://github.com/AdventureLuna/LunasStorage). Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The included workflow builds with `/LunasStorage/` as Vite's base for project Pages and deploys on pushes to `main`. In **Settings → Secrets and variables → Actions → Variables**, add `VITE_SUPABASE_URL` (the project base URL) and `VITE_SUPABASE_PUBLISHABLE_KEY` (the `sb_publishable_…` key). These are browser-visible public values, not secrets; never add a Supabase secret key. Saving repository variables and pushing to `main` starts a fresh build. For a user/organization root Pages site, adjust `vite.config.ts` base to `/`.
 
 Database migrations are applied separately to Supabase; deploying the static frontend does not apply SQL. The included check workflow runs typecheck, lint, tests and build.
 
