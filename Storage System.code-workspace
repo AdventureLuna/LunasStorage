@@ -1,0 +1,11 @@
+{
+  "folders": [
+    { "name": "Storage System", "path": "." }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.DS_Store": true,
+      "**/Thumbs.db": true
+    }
+  }
+}

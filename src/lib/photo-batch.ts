@@ -1,0 +1,1 @@
+export async function uploadIndividually<T>(files:T[],upload:(file:T,index:number)=>Promise<unknown>){const failed:T[]=[],errors:string[]=[];for(let index=0;index<files.length;index++){try{await upload(files[index],index)}catch(error){failed.push(files[index]);errors.push(error instanceof Error?error.message:String(error));}}return{failed,errors};}

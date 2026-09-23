@@ -1,0 +1,7 @@
+# Export schema, version 1
+
+The JSON object has `schema: "home-storage-inventory"`, integer `version: 1`, ISO `exported_at`, and `data` containing arrays named `locations`, `boxes`, `items`, and `item_photos`. Database UUIDs remain stable; `owner_id` values identify the exporting account and must be remapped on restore. Foreign keys retain location, box, and item relationships. Archived records are included. Photos are records with `object_path`; in the ZIP, `photo-manifest.json` maps that path to a relative `photos/…` archive path. Signed URLs are never serialized.
+
+The CSV flattens item identity, name, derived address, tags, quantity, unit, total entry volume, notes and archive state. It is for human review and is not a restore format. Null quantity and volume values mean unknown/unrecorded.
+
+Restore accepts only the full ZIP, not a standalone JSON/CSV file. The local utility validates references and media, uploads staged JPEGs through the authenticated private Storage API, remaps the paths to the target account, then calls `restore_inventory`. The RPC refuses a nonempty account, preserves record/photo IDs and box numbers, prevents reuse of previously allocated target box numbers, and advances the counter. If a photo upload or the RPC fails, the utility attempts owner-scoped cleanup; after a network-ambiguous RPC failure it keeps staged photos rather than risk deleting a successfully restored photo and lists the paths for manual reconciliation.
