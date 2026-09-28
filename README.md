@@ -3,6 +3,14 @@
 Private, mobile-friendly home inventory.
 React, TypeScript and Vite serve the static app; Supabase Auth, Postgres RLS and private Storage hold the live inventory. No privileged key or always-running backend is used by the browser.
 
+## Browse and fill your storage
+
+- **Inventory** is a photo-card catalog. Search by item name, notes, tags, box name or location, then narrow the results with filters. Each card links to a dedicated item page with its complete photo gallery, notes, quantity, edit, archive and move controls. Item links use `#/item/<id>` and work when opened directly on GitHub Pages after signing in.
+- **Storage** opens one location at a time. Use the breadcrumbs to move up, open sub-locations, or expand a box for **Fill this box**, **View items**, edit and delete actions. Space estimates are tucked away until needed.
+- Enter any **Box name**, such as `Box 10` or `Christmas decorations`. Existing unnamed boxes retain their original labels. The label uses the existing `boxes.description` field; `box_number` remains an internal identifier for compatibility with existing exports and restores. This update does not require a database migration.
+- The **Store in** selector remembers the last destination for your account on this browser. **Save & add another** clears the item fields and keeps that destination so you can fill a box continuously. Deleted destinations are discarded automatically.
+- Choose several gallery photos at once or add photos in successive selections. Pending photos have previews and individual remove buttons. Saving reports upload progress; successful photos are retained if another photo fails, and retries upload only the remaining files.
+
 ## Run locally
 
 1. Create a free Supabase project.
