@@ -18,7 +18,7 @@ from backend.store import new_id, now
 
 def main():
     with tempfile.TemporaryDirectory(prefix='lunas-visual-test-') as directory:
-        app = create_app(Path(directory))
+        app = create_app(Path(directory),cookie_name='lunas_visual_fixture')
         store = app.state.store
         location, child, box = new_id(), new_id(), new_id()
         token = secrets.token_urlsafe(32)
@@ -42,7 +42,7 @@ def main():
         async def fixture_session(request, call_next):
             response = await call_next(request)
             if request.url.path == '/':
-                response.set_cookie('inventory_session', token, httponly=True, samesite='strict')
+                response.set_cookie('lunas_visual_fixture', token, httponly=True, samesite='strict')
             return response
         print('Visual fixture: http://localhost:8765 (temporary synthetic inventory only)', flush=True)
         uvicorn.run(app, host='127.0.0.1', port=8765, log_level='warning')

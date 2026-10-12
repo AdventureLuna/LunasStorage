@@ -8,6 +8,7 @@ import sqlite3
 import time
 import warnings
 from pathlib import Path
+from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -37,9 +38,20 @@ class LocationInput(Model):
     name: str = Field(min_length=1, max_length=500)
     parent_id: str | None = None
     expected_version: int | None = Field(default=None, ge=1)
+    icon: Literal['folder', 'home', 'shelf', 'drawer'] = 'folder'
+    color: Literal['sage', 'blue', 'amber', 'rose'] = 'sage'
+
+
+class LocationBatch(Model):
+    names: list[str] = Field(min_length=1, max_length=50)
+    parent_id: str | None = None
+    request_id: str
+    icon: Literal['folder', 'home', 'shelf', 'drawer'] = 'folder'
+    color: Literal['sage', 'blue', 'amber', 'rose'] = 'sage'
 
 
 class BoxInput(Model):
+    id: str | None = None
     location_id: str
     description: str | None = Field(default=None, max_length=1000)
     capacity_l: float | None = Field(default=None, ge=0)
@@ -122,7 +134,17 @@ def validated_image(content: bytes, compress=True) -> bytes:
         raise ValueError(f'Invalid or unsupported photo: {error}') from error
 
 
-def create_app(directory: Path | None = None, frontend: Path | None = None):
+@lru_cache(maxsize=128)
+def thumbnail(path: str, modified: int, size: int) -> bytes:
+    with Image.open(path) as image:
+        image = ImageOps.exif_transpose(image).convert('RGB')
+        image.thumbnail((size, size))
+        output = io.BytesIO()
+        image.save(output, 'JPEG', quality=80)
+        return output.getvalue()
+
+
+def create_app(directory: Path | None = None, frontend: Path | None = None, cookie_name: str = 'inventory_session'):
     store = Store(directory or default_data_dir())
     build = (frontend or ROOT / 'dist').resolve()
     app = FastAPI(title='LunasStorage local API', docs_url=None, redoc_url=None, openapi_url=None)
@@ -154,7 +176,7 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
         return result
 
     def current_user(request: Request):
-        token = request.cookies.get('inventory_session', '')
+        token = request.cookies.get(cookie_name, '')
         with store.connect() as db:
             session = db.execute('SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?', (token_hash(token), time.time())).fetchone()
             account = db.execute('SELECT username FROM account WHERE id=1').fetchone()
@@ -166,7 +188,7 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
         token = secrets.token_urlsafe(32)
         db.execute('DELETE FROM sessions WHERE expires_at<?', (time.time(),))
         db.execute('INSERT INTO sessions VALUES(?,?)', (token_hash(token), time.time() + SESSION_AGE))
-        response.set_cookie('inventory_session', token, max_age=SESSION_AGE, httponly=True, samesite='strict', path='/')
+        response.set_cookie(cookie_name, token, max_age=SESSION_AGE, httponly=True, samesite='strict', path='/')
 
     @app.get('/api/auth/status')
     def auth_status(request: Request):
@@ -216,8 +238,8 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
     @app.post('/api/auth/logout')
     def logout(request: Request, response: Response):
         with store.write() as db:
-            db.execute('DELETE FROM sessions WHERE token_hash=?', (token_hash(request.cookies.get('inventory_session', '')),))
-        response.delete_cookie('inventory_session', path='/')
+            db.execute('DELETE FROM sessions WHERE token_hash=?', (token_hash(request.cookies.get(cookie_name, '')),))
+        response.delete_cookie(cookie_name, path='/')
         return {'ok': True}
 
     protected = [Depends(current_user)]
@@ -225,6 +247,71 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
     @app.get('/api/locations', dependencies=protected)
     def locations():
         return sorted(store.rows('locations'), key=lambda row: row['name'].casefold())
+
+    @app.get('/api/storage-summary', dependencies=protected)
+    def storage_summary():
+        with store.connect() as db:
+            db.execute('BEGIN')
+            places = [dict(row) for row in db.execute('SELECT id,parent_id FROM locations')]
+            boxes = [dict(row) for row in db.execute('SELECT id,location_id FROM boxes')]
+            entries = [dict(row) for row in db.execute('SELECT box_id,location_id,archived,volume_l FROM items')]
+        summaries = {place['id']: {'direct_boxes': 0, 'direct_items': 0, 'boxes': 0, 'items': 0, 'archived_items': 0} for place in places}
+        box_summaries = {box['id']: {'items': 0, 'archived_items': 0, 'known_volume_l': 0, 'missing_estimate_count': 0} for box in boxes}
+        box_places = {box['id']: box['location_id'] for box in boxes}
+        for box in boxes:
+            summaries[box['location_id']]['direct_boxes'] += 1
+            summaries[box['location_id']]['boxes'] += 1
+        for entry in entries:
+            place = entry['location_id'] or box_places.get(entry['box_id'])
+            key = 'archived_items' if entry['archived'] else 'items'
+            summaries[place][key] += 1
+            if not entry['box_id'] and not entry['archived']:
+                summaries[place]['direct_items'] += 1
+            if entry['box_id']:
+                summary = box_summaries[entry['box_id']]
+                summary[key] += 1
+                if not entry['archived']:
+                    if entry['volume_l'] is None:
+                        summary['missing_estimate_count'] += 1
+                    else:
+                        summary['known_volume_l'] += entry['volume_l']
+        children = {}
+        for place in places:
+            children.setdefault(place['parent_id'], []).append(place['id'])
+        def roll_up(place_id):
+            summary = summaries[place_id]
+            for child in children.get(place_id, []):
+                descendant = roll_up(child)
+                for key in ('boxes', 'items', 'archived_items'):
+                    summary[key] += descendant[key]
+            return summary
+        for root in children.get(None, []):
+            roll_up(root)
+        return {'locations': summaries, 'boxes': box_summaries, 'totals': {'locations': len(places), 'boxes': len(boxes), 'items': sum(not row['archived'] for row in entries), 'archived_items': sum(bool(row['archived']) for row in entries)}}
+
+    @app.post('/api/locations/batch', dependencies=protected)
+    def add_location_batch(body: LocationBatch):
+        import uuid
+        try:
+            uuid.UUID(body.request_id)
+        except ValueError:
+            raise HTTPException(422, 'Invalid creation request ID')
+        names = [ensure_name(name) for name in body.names]
+        if len({name.casefold() for name in names}) != len(names):
+            raise HTTPException(422, 'Remove duplicate location names from the list')
+        with store.write() as db:
+            if body.parent_id and not db.execute('SELECT 1 FROM locations WHERE id=?', (body.parent_id,)).fetchone():
+                raise HTTPException(422, 'Parent location is unavailable')
+            result = []
+            for index, name in enumerate(names):
+                target = str(uuid.uuid5(uuid.UUID(body.request_id), str(index)))
+                existing = db.execute('SELECT * FROM locations WHERE id=?', (target,)).fetchone()
+                if existing and (existing['name'] != name or existing['parent_id'] != body.parent_id):
+                    raise HTTPException(409, 'A previous creation request has different names. Start a new creation form.')
+                if not existing:
+                    db.execute('INSERT INTO locations(id,name,parent_id,icon,color,version,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)', (target, name, body.parent_id, body.icon, body.color, now(), now()))
+                result.append(decode(db.execute('SELECT * FROM locations WHERE id=?', (target,)).fetchone()))
+            return result
 
     def save_location(body, row_id=None):
         with store.write() as db:
@@ -242,9 +329,9 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
                 ancestor = row['parent_id']
             if row_id:
                 require_version(db, 'locations', row_id, body.expected_version)
-                db.execute('UPDATE locations SET name=?,parent_id=?,version=version+1,updated_at=? WHERE id=?', (name, body.parent_id, now(), row_id))
+                db.execute('UPDATE locations SET name=?,parent_id=?,icon=?,color=?,version=version+1,updated_at=? WHERE id=?', (name, body.parent_id, body.icon, body.color, now(), row_id))
             else:
-                db.execute('INSERT INTO locations(id,name,parent_id,version,created_at,updated_at) VALUES(?,?,?,1,?,?)', (target, name, body.parent_id, now(), now()))
+                db.execute('INSERT INTO locations(id,name,parent_id,icon,color,version,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)', (target, name, body.parent_id, body.icon, body.color, now(), now()))
             return decode(db.execute('SELECT * FROM locations WHERE id=?', (target,)).fetchone())
 
     @app.post('/api/locations', dependencies=protected)
@@ -268,7 +355,9 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
 
     def save_box(body, row_id=None):
         with store.write() as db:
-            target = row_id or new_id()
+            target = row_id or body.id or new_id()
+            if not row_id and db.execute('SELECT 1 FROM boxes WHERE id=?', (target,)).fetchone():
+                return decode(db.execute('SELECT * FROM boxes WHERE id=?', (target,)).fetchone())
             if row_id:
                 require_version(db, 'boxes', row_id, body.expected_version)
                 db.execute('UPDATE boxes SET location_id=?,description=?,capacity_l=?,version=version+1,updated_at=? WHERE id=?', (body.location_id, body.description, body.capacity_l, now(), row_id))
@@ -299,12 +388,18 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
             return [dict(row) for row in db.execute('SELECT b.id AS box_id,coalesce(sum(i.volume_l),0) AS known_volume_l,count(i.id)-count(i.volume_l) AS missing_estimate_count FROM boxes b LEFT JOIN items i ON i.box_id=b.id AND i.archived=0 GROUP BY b.id')]
 
     @app.get('/api/items', dependencies=protected)
-    def items(search: str = '', location: str = '', box: str = '', tag: str = '', archived: bool = False, out: bool = False, page: int = Query(0, ge=0), pageSize: int = Query(30, ge=1, le=100)):
+    def items(search: str = '', location: str = '', box: str = '', tag: str = '', archived: bool = False, out: bool = False, subtree: bool = False, loose: bool = False, sort: Literal['newest', 'name'] = 'newest', page: int = Query(0, ge=0), pageSize: int = Query(30, ge=1, le=100)):
         clauses = ['i.archived=?']
         values = [int(archived)]
         if location:
-            clauses.append('(i.location_id=? OR b.location_id=?)')
-            values.extend([location, location])
+            if subtree:
+                clauses.append('coalesce(i.location_id,b.location_id) IN (WITH RECURSIVE descendants(id) AS (SELECT id FROM locations WHERE id=? UNION ALL SELECT l.id FROM locations l JOIN descendants d ON l.parent_id=d.id) SELECT id FROM descendants)')
+                values.append(location)
+            else:
+                clauses.append('(i.location_id=? OR b.location_id=?)')
+                values.extend([location, location])
+        if loose:
+            clauses.append('i.box_id IS NULL')
         if box:
             clauses.append('i.box_id=?'); values.append(box)
         if tag:
@@ -316,13 +411,15 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
         except ValueError:
             terms = search.split()
         for term in terms[:30]:
-            clauses.append("casefold(coalesce(i.name,'')||' '||coalesce(i.notes,'')||' '||i.tags||' '||coalesce(b.description,'')||' '||coalesce(b.box_number,'')||' '||coalesce(l.name,'')||' '||coalesce(bl.name,'')) LIKE ? ESCAPE '\\'")
+            clauses.append("casefold(coalesce(i.name,'')||' '||coalesce(i.notes,'')||' '||i.tags||' '||coalesce(b.description,'')||' '||coalesce(b.box_number,'')||' '||coalesce(lp.path,'')) LIKE ? ESCAPE '\\'")
             values.append('%' + term.casefold().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
-        sql = ' FROM items i LEFT JOIN boxes b ON b.id=i.box_id LEFT JOIN locations l ON l.id=i.location_id LEFT JOIN locations bl ON bl.id=b.location_id WHERE ' + ' AND '.join(clauses)
+        prefix = "WITH RECURSIVE place_paths(id,path) AS (SELECT id,name FROM locations WHERE parent_id IS NULL UNION ALL SELECT l.id,p.path||' '||l.name FROM locations l JOIN place_paths p ON l.parent_id=p.id) "
+        sql = ' FROM items i LEFT JOIN boxes b ON b.id=i.box_id LEFT JOIN place_paths lp ON lp.id=coalesce(i.location_id,b.location_id) WHERE ' + ' AND '.join(clauses)
         with store.connect() as db:
             db.execute('BEGIN')
-            count = db.execute('SELECT count(*)' + sql, values).fetchone()[0]
-            ids = db.execute('SELECT i.id' + sql + ' ORDER BY i.created_at DESC,i.id LIMIT ? OFFSET ?', values + [pageSize, page * pageSize]).fetchall()
+            count = db.execute(prefix + 'SELECT count(*)' + sql, values).fetchone()[0]
+            order = 'casefold(i.name),i.id' if sort == 'name' else 'i.created_at DESC,i.id'
+            ids = db.execute(prefix + 'SELECT i.id' + sql + f' ORDER BY {order} LIMIT ? OFFSET ?', values + [pageSize, page * pageSize]).fetchall()
             result = [store.item(db, row['id']) for row in ids]
         return {'items': result, 'count': count}
 
@@ -454,12 +551,13 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
             raise
 
     @app.get('/api/photos/file', dependencies=protected)
-    def photo_file(path: str):
+    def photo_file(path: str, size: int | None = Query(None, ge=64, le=2048)):
         with store.locked(), store.connect() as db:
             if not db.execute('SELECT 1 FROM item_photos WHERE object_path=?', (path,)).fetchone():
                 raise HTTPException(404, 'Photo is unavailable')
             try:
-                content = safe_path(store.photos, path).read_bytes()
+                source = safe_path(store.photos, path)
+                content = thumbnail(str(source), source.stat().st_mtime_ns, size) if size else source.read_bytes()
             except (ValueError, FileNotFoundError):
                 raise HTTPException(404, 'Photo file is missing; run the local verify command')
         try:

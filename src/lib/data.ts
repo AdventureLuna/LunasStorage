@@ -10,13 +10,13 @@ export const saveItem = (item: Partial<Item> & { name: string }, expected?: numb
 export const setPhotoOrder = (itemId: string, orderedIds: string[], coverId: string) => api.photoOrder(itemId, orderedIds, coverId);
 export async function removePhotoRecord(photoId: string) { return (await api.deletePhoto(photoId)).warning; }
 const photoIds = new WeakMap<File, string>();
+export function photoRequestId(file:File){let id=photoIds.get(file);if(!id){id=newId();photoIds.set(file,id)}return id;}
 export async function uploadPhoto(itemId: string, file: File) {
-  let id = photoIds.get(file);
-  if (!id) { id = newId(); photoIds.set(file, id); }
+  const id = photoRequestId(file);
   return api.uploadPhoto(itemId, id, await compressImage(file));
 }
 async function compressImage(file: File) {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw Error(`${file.name}: use JPEG, PNG or WebP. Convert HEIC/HEIF before selecting it.`);
+  if (file.type&&!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw Error(`${file.name}: use JPEG, PNG or WebP. Convert HEIC/HEIF before selecting it.`);
   if (!globalThis.createImageBitmap) return file;
   let bitmap: ImageBitmap;
   try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { return file; }

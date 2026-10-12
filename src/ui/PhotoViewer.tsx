@@ -1,0 +1,15 @@
+import { useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
+import type { Photo as PhotoRecord } from '../lib/types';
+import { Sheet } from './common';
+import { Photo } from './Photo';
+
+export function PhotoViewer({photos,activeId,onChoose,onClose}:{photos:PhotoRecord[];activeId:string;onChoose:(id:string)=>void;onClose:()=>void}){
+  const[zoom,setZoom]=useState(1),[pan,setPan]=useState({x:0,y:0});const pointers=useRef(new Map<number,{x:number;y:number}>()),start=useRef({x:0,y:0});
+  const index=Math.max(0,photos.findIndex(row=>row.id===activeId));const move=(direction:number)=>{onChoose(photos[(index+direction+photos.length)%photos.length].id);setZoom(1);setPan({x:0,y:0})};
+  return <Sheet title={`Photo ${index+1} of ${photos.length}`} onClose={onClose} wide>
+    <div className="photo-viewer" style={{touchAction:'none'}} onPointerDown={event=>{event.currentTarget.setPointerCapture?.(event.pointerId);pointers.current.set(event.pointerId,{x:event.clientX,y:event.clientY});start.current={x:event.clientX,y:event.clientY}}} onPointerMove={event=>{const previous=pointers.current.get(event.pointerId);if(!previous)return;const before=[...pointers.current.values()];pointers.current.set(event.pointerId,{x:event.clientX,y:event.clientY});const after=[...pointers.current.values()];if(after.length>=2){const distance=(values:{x:number;y:number}[])=>Math.hypot(values[0].x-values[1].x,values[0].y-values[1].y);const old=distance(before);if(old>0)setZoom(value=>Math.max(1,Math.min(4,value*distance(after)/old)))}else if(zoom>1){const width=event.currentTarget.clientWidth*(zoom-1)/2,height=event.currentTarget.clientHeight*(zoom-1)/2;setPan(value=>({x:Math.max(-width,Math.min(width,value.x+event.clientX-previous.x)),y:Math.max(-height,Math.min(height,value.y+event.clientY-previous.y))}))}}} onPointerUp={event=>{if(pointers.current.size===1&&zoom===1){const dx=event.clientX-start.current.x,dy=event.clientY-start.current.y;if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy))move(dx<0?1:-1)}pointers.current.delete(event.pointerId)}} onPointerCancel={()=>pointers.current.clear()}>
+      <div className="viewer-image" style={{transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`}}><Photo interactive key={photos[index].id} path={photos[index].object_path} size={2048} alt={`Item detail photo ${index+1}`}/></div>
+    </div><div className="viewer-controls"><button aria-label="Previous photo" onClick={()=>move(-1)} disabled={photos.length<2}><ChevronLeft/></button><button aria-label="Zoom out" disabled={zoom<=1} onClick={()=>{setZoom(value=>Math.max(1,value-.5));setPan({x:0,y:0})}}><Minus/></button><button onClick={()=>{setZoom(1);setPan({x:0,y:0})}}>{Math.round(zoom*100)}%</button><button aria-label="Zoom in" disabled={zoom>=4} onClick={()=>setZoom(value=>Math.min(4,value+.5))}><Plus/></button><button aria-label="Next photo" onClick={()=>move(1)} disabled={photos.length<2}><ChevronRight/></button></div><p className="hint">Swipe between photos. Pinch or use the buttons to zoom, then drag to inspect details.</p>
+  </Sheet>;
+}

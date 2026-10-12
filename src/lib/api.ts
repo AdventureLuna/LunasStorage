@@ -1,6 +1,6 @@
-import type { Box, InventoryRow, Item, Location, Photo } from './types';
+import type { Box, InventoryRow, Item, Location, Photo, StorageSummary } from './types';
 export type Session = { user: { id: string; email: string } };
-export type ItemQuery = { search: string; location: string; box: string; tag: string; archived: boolean; out: boolean; page: number; pageSize?: number };
+export type ItemQuery = { search: string; location: string; box: string; tag: string; archived: boolean; out: boolean; page: number; pageSize?: number;subtree?:boolean;loose?:boolean;sort?:'newest'|'name' };
 export type Estimate = { box_id: string; known_volume_l: number; missing_estimate_count: number };
 export type Export = { schema: string; version: number; exported_at: string; data: Record<string, unknown[]> };
 export class ApiError extends Error {
@@ -15,7 +15,8 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: `Server returned ${response.status}` }));
     if (response.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('inventory-auth-expired'));
-    throw new ApiError(typeof error.detail === 'string' ? error.detail : JSON.stringify(error.detail), response.status);
+    const message = typeof error.detail === 'string' ? error.detail : Array.isArray(error.detail) ? error.detail.map((issue:{loc?:string[];msg:string})=>`${issue.loc?.slice(1).join(' ')||'Input'}: ${issue.msg}`).join('. ') : 'The request could not be completed';
+    throw new ApiError(message, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -26,10 +27,12 @@ export const api = {
   login: (username: string, password: string, setup = false) => request<Session>(`/auth/${setup ? 'setup' : 'login'}`, json('POST', { username, password })),
   logout: async () => { await request('/auth/logout', { method: 'POST' }); window.dispatchEvent(new Event('inventory-auth-expired')); },
   locations: () => request<Location[]>('/locations'),
-  saveLocation: (body: { name: string; parent_id: string | null }, current?: Location | null) => request<Location>(current ? `/locations/${id(current.id)}` : '/locations', json(current ? 'PUT' : 'POST', { ...body, expected_version: current?.version })),
+  saveLocation: (body: { name: string; parent_id: string | null;icon?:string;color?:string }, current?: Location | null) => request<Location>(current ? `/locations/${id(current.id)}` : '/locations', json(current ? 'PUT' : 'POST', { ...body, expected_version: current?.version })),
+  locationBatch: (names:string[],parentId:string|null,requestId:string,appearance:{icon?:string;color?:string}={})=>request<Location[]>('/locations/batch',json('POST',{names,parent_id:parentId,request_id:requestId,...appearance})),
+  summary:()=>request<StorageSummary>('/storage-summary'),
   deleteLocation: (location: Location) => request(`/locations/${id(location.id)}?version=${location.version}`, { method: 'DELETE' }),
   boxes: () => request<Box[]>('/boxes'),
-  saveBox: (body: { location_id: string; description: string | null; capacity_l: number | null }, current?: Box | null) => request<Box>(current ? `/boxes/${id(current.id)}` : '/boxes', json(current ? 'PUT' : 'POST', { ...body, expected_version: current?.version })),
+  saveBox: (body: { id?:string;location_id: string; description: string | null; capacity_l: number | null }, current?: Box | null) => request<Box>(current ? `/boxes/${id(current.id)}` : '/boxes', json(current ? 'PUT' : 'POST', { ...body, expected_version: current?.version })),
   deleteBox: (box: Box) => request(`/boxes/${id(box.id)}?version=${box.version}`, { method: 'DELETE' }),
   estimates: () => request<Estimate[]>('/box-estimates'),
   listItems: (query: ItemQuery) => request<{ items: InventoryRow[]; count: number }>(`/items?${new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => [key, String(value)]))}`),

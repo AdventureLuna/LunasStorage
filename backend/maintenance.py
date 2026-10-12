@@ -271,8 +271,11 @@ def restore_backup(source: Path, directory: Path):
                 raise ValueError(f'Restore validation failed: {check}')
             with restored.connect() as db:
                 # Ensure the JSON and SQLite snapshot describe exactly the same inventory.
-                if restored.export(db)['data'] != archive['data']:
-                    raise ValueError('SQLite snapshot does not match the inventory export')
+                actual = restored.export(db)['data']
+                for table in TABLES:
+                    target = {row['id']: row for row in actual[table]}
+                    if len(target) != len(archive['data'][table]) or any(row['id'] not in target or any(target[row['id']].get(key) != value for key, value in row.items()) for row in archive['data'][table]):
+                        raise ValueError('SQLite snapshot does not match the inventory export')
                 db.execute('DELETE FROM sessions')
                 db.execute('DELETE FROM login_attempts')
                 db.execute('PRAGMA wal_checkpoint(TRUNCATE)')

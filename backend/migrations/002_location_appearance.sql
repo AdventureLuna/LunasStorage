@@ -1,0 +1,2 @@
+ALTER TABLE locations ADD COLUMN icon TEXT NOT NULL DEFAULT 'folder';
+ALTER TABLE locations ADD COLUMN color TEXT NOT NULL DEFAULT 'sage';

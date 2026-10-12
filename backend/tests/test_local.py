@@ -226,7 +226,7 @@ def test_schema_migrations_foreign_keys_and_paths(tmp_path, monkeypatch):
     Store(store.root)
     with store.connect() as db:
         assert db.execute('PRAGMA foreign_keys').fetchone()[0] == 1
-        assert db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0] == 2
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO boxes VALUES('x',NULL,1,'missing',NULL,NULL,1,'now','now')")
     for path in ['../secret', '/absolute', 'C:/secret', 'nested\\secret', 'a//b', 'a/CON.jpg', 'a/trailing.']:

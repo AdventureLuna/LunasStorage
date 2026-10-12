@@ -2,7 +2,10 @@ import { act, startTransition, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PhotoPicker } from './PhotoPicker';
-import { StorageBrowser } from './StorageBrowser';
+import { StorageView } from './StorageView';
+import {useLocation} from 'react-router-dom';
+import {createMemoryRouter,RouterProvider} from 'react-router-dom';
+import {WorkspaceContext,emptySummary} from './model';
 import { ItemPage } from './ItemPage';
 import { InventoryGallery } from './InventoryGallery';
 import type { Box, InventoryRow, Location } from '../lib/types';
@@ -53,22 +56,22 @@ describe('photo selection regression', () => {
 });
 
 describe('storage browsing and box labels', () => {
-  it('shows only the current level and reaches a named box through its parent locations', async () => {
-    const add = vi.fn();
-    await act(() => root.render(<StorageBrowser locations={locations} boxes={boxes} estimates={{}} onNewLocation={vi.fn()} onEditLocation={vi.fn()} onDeleteLocation={vi.fn()} onNewBox={vi.fn()} onEditBox={vi.fn()} onDeleteBox={vi.fn()} onContents={vi.fn()} onAddItem={add}/>));
-    expect(container.textContent).not.toContain('Shelf A');
-    expect(container.textContent).not.toContain('Box 10');
-    await act(() => (container.querySelector('.folder-row') as HTMLButtonElement).click());
+  it('shows descendant totals, navigable box pages and loose entries without nested action clutter', async () => {
+    vi.stubGlobal('fetch',vi.fn().mockImplementation(async()=>new Response(JSON.stringify({items:[],count:0}))));
+    function Places(){const route=useLocation();const parts=route.pathname.split('/');return <StorageView locationId={parts[1]==='storage'?parts[2]:undefined} boxId={parts[1]==='box'?parts[2]:undefined}/>}
+    const summary={...emptySummary,totals:{locations:2,boxes:1,items:4,archived_items:0},locations:{room:{direct_boxes:0,direct_items:1,boxes:1,items:4,archived_items:0},shelf:{direct_boxes:1,direct_items:0,boxes:1,items:3,archived_items:0}},boxes:{box:{items:3,archived_items:0,known_volume_l:0,missing_estimate_count:3}}};
+    const router=createMemoryRouter([{path:'*',element:<WorkspaceContext.Provider value={{userId:'test',locations,boxes,summary,revision:0,go:vi.fn(),back:vi.fn(),refresh:async()=>{},notify:vi.fn()}}><Places/></WorkspaceContext.Provider>}],{initialEntries:['/storage']});
+    await act(async()=>root.render(<RouterProvider router={router}/>));
+    expect(container.textContent).toContain('4 active entries inside');
     expect(container.textContent).toContain('Shelf A');
     expect(container.textContent).not.toContain('Box 10');
-    await act(() => (container.querySelector('.folder-row') as HTMLButtonElement).click());
-    expect(container.textContent).toContain('Box 10');
-    expect(container.textContent).not.toContain('Fill this box');
-    await act(() => (container.querySelector('.folder-row') as HTMLButtonElement).click());
-    await act(() => (container.querySelector('.box-primary-actions button') as HTMLButtonElement).click());
-    expect(add).toHaveBeenCalledWith(boxes[0]);
-    await act(() => (container.querySelector('.breadcrumbs button') as HTMLButtonElement).click());
-    expect(container.textContent).not.toContain('Box 10');
+    await act(async()=>{await router.navigate('/storage/shelf')});
+    expect(container.querySelector('a[href="#/box/box"]')).toBeTruthy();
+    expect(container.textContent).toContain('Loose items here');
+    await act(async()=>{await router.navigate('/box/box')});
+    expect(container.querySelector('a[href="#/box/box/fill"]')?.textContent).toContain('Fill this box');
+    expect(container.textContent).toContain('Box contents');
+    router.dispose();
   });
 
   it('accepts arbitrary labels while keeping legacy unnamed boxes readable', () => {
@@ -97,13 +100,14 @@ describe('catalog item pages', () => {
   });
   it('switches the large image and passes the chosen move destination', async () => {
     const move = vi.fn().mockResolvedValue(undefined);
-    await act(() => root.render(<ItemPage item={item} locations={locations} boxes={boxes} onEdit={vi.fn()} onArchive={vi.fn()} onMove={move} photo={path => <img src={path} alt="Test photo"/>}/>));
+    const router=createMemoryRouter([{path:'*',element:<WorkspaceContext.Provider value={{userId:'test',locations,boxes,summary:emptySummary,revision:0,go:vi.fn(),back:vi.fn(),refresh:async()=>{},notify:vi.fn()}}><ItemPage item={item} locations={locations} boxes={boxes} onEdit={vi.fn()} onArchive={vi.fn()} onMove={move} photo={path => <img src={path} alt="Test photo"/>}/></WorkspaceContext.Provider>}],{initialEntries:['/item/item']});
+    await act(() => root.render(<RouterProvider router={router}/>));
     expect(container.querySelector('.item-hero img')?.getAttribute('src')).toBe('one');
     await act(() => (container.querySelector('[aria-label="View photo 2"]') as HTMLButtonElement).click());
     expect(container.querySelector('.item-hero img')?.getAttribute('src')).toBe('two');
-    const select = container.querySelector('select')!;
-    await act(() => { select.value = 'l:room'; select.dispatchEvent(new Event('change', { bubbles: true })); });
-    await act(async () => { (container.querySelector('.move-item button') as HTMLButtonElement).click(); await Promise.resolve(); });
-    expect(move).toHaveBeenCalledWith('l:room');
+    await act(()=>{([...container.querySelectorAll('button')].find(button=>button.textContent==='Move to another box or location')!).click()});
+    const destination=[...container.querySelectorAll('.destination-row')].find(row=>row.querySelector('strong')?.textContent==='Basement') as HTMLButtonElement;
+    await act(async()=>{destination.click()});
+    expect(move).toHaveBeenCalledWith('l:room');router.dispose();
   });
 });

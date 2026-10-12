@@ -6,13 +6,15 @@ type Props = {
   disabled: boolean;
   onFiles: (files: File[]) => void;
   onRemove: (index: number) => void;
+  states?: Array<{state:string;error?:string}>;
+  onRetry?: (index:number)=>void;
 };
 
-export function PhotoPicker({ files, disabled, onFiles, onRemove }: Props) {
+export function PhotoPicker({ files, disabled, onFiles, onRemove, states, onRetry }: Props) {
   return <section aria-label="Add photos">
     <div className="upload-options">
       <label className="upload-card">
-        <Camera/><span><strong>Take a photo</strong><small>Use the rear camera</small></span>
+        <Camera/><span><strong>Take a photo</strong><small>Open your phone camera</small></span>
         {/* Use the standard image capture form; MIME lists can take a different native-picker path. */}
         <input aria-label="Take a photo with the camera" type="file" accept="image/*" capture="environment" disabled={disabled}
           onChange={event => {
@@ -34,12 +36,12 @@ export function PhotoPicker({ files, disabled, onFiles, onRemove }: Props) {
     </div>
     {files.length > 0 && <>
       <p className="hint">{files.length} photo{files.length === 1 ? '' : 's'} waiting to upload</p>
-      <div className="pending-photos">{files.map((file, index) => <PendingPhoto key={`${index}:${file.name}:${file.lastModified}`} file={file} disabled={disabled} onRemove={() => onRemove(index)}/>)}</div>
+      <div className="pending-photos">{files.map((file, index) => <PendingPhoto key={`${index}:${file.name}:${file.lastModified}`} file={file} disabled={disabled} state={states?.[index]} onRetry={onRetry?()=>onRetry(index):undefined} onRemove={() => onRemove(index)}/>)}</div>
     </>}
   </section>;
 }
 
-function PendingPhoto({ file, disabled, onRemove }: { file: File; disabled: boolean; onRemove: () => void }) {
+function PendingPhoto({ file, disabled, onRemove, state, onRetry }: { file: File; disabled: boolean; onRemove: () => void;state?:{state:string;error?:string};onRetry?:()=>void }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
     const next = URL.createObjectURL(file);
@@ -50,5 +52,8 @@ function PendingPhoto({ file, disabled, onRemove }: { file: File; disabled: bool
     <img src={url || undefined} alt={file.name}/>
     <button type="button" className="icon" disabled={disabled} aria-label={`Remove pending photo ${file.name}`} onClick={onRemove}><X size={16}/></button>
     <figcaption title={file.name}>{file.name}</figcaption>
+    {state&&<p className="photo-state" role="status">{state.state==='uploading'?'Uploading…':state.state==='error'?'Needs retry':'Ready'}</p>}
+    {state?.error&&<p className="photo-error">{state.error}</p>}
+    {state?.state==='error'&&onRetry&&<button className="photo-retry" disabled={disabled} onClick={onRetry}>Retry</button>}
   </figure>;
 }
