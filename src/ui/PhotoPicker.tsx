@@ -13,7 +13,8 @@ export function PhotoPicker({ files, disabled, onFiles, onRemove }: Props) {
     <div className="upload-options">
       <label className="upload-card">
         <Camera/><span><strong>Take a photo</strong><small>Use the rear camera</small></span>
-        <input aria-label="Take a photo with the camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={disabled}
+        {/* Use the standard image capture form; MIME lists can take a different native-picker path. */}
+        <input aria-label="Take a photo with the camera" type="file" accept="image/*" capture="environment" disabled={disabled}
           onChange={event => {
             const picked = Array.from(event.currentTarget.files ?? []);
             event.currentTarget.value = '';
