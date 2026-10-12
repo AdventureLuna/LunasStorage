@@ -36,6 +36,7 @@ export const api = {
   item: (itemId: string) => request<InventoryRow>(`/items/${id(itemId)}`),
   saveItem: (item: Partial<Item> & { name: string }, expected?: number) => request<InventoryRow>(expected !== undefined ? `/items/${id(item.id!)}` : '/items', json(expected !== undefined ? 'PUT' : 'POST', { ...item, expected_version: expected })),
   archive: (item: InventoryRow) => request<InventoryRow>(`/items/${id(item.id)}/archive`, json('POST', { archived: !item.archived, expected_version: item.version })),
+  deleteItems: (items: Array<{ id: string; version: number }>) => request<{ deleted: number; photo_cleanup_failures: string[] }>('/items/delete', json('POST', { items })),
   move: (itemIds: string[], destinationId: string, destinationType: 'box' | 'location') => request<{ moved: number }>('/moves', json('POST', { item_ids: itemIds, destination_id: destinationId, destination_type: destinationType })),
   photoOrder: (itemId: string, orderedIds: string[], coverId: string) => request(`/items/${id(itemId)}/photo-order`, json('PUT', { ordered_photo_ids: orderedIds, cover_photo_id: coverId })),
   deletePhoto: (photoId: string) => request<{ warning: string | null }>(`/photos/${id(photoId)}`, { method: 'DELETE' }),

@@ -2,8 +2,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
+import type { InventoryRow } from '../lib/types';
 
-const mocks = vi.hoisted(() => ({ saveItem: vi.fn(), uploadPhoto: vi.fn(), listItems: vi.fn() }));
+const mocks = vi.hoisted(() => ({ saveItem: vi.fn(), uploadPhoto: vi.fn(), listItems: vi.fn(), deleteItems: vi.fn() }));
 vi.mock('../lib/data', () => ({
   ...mocks,
   address: () => '',
@@ -11,6 +12,7 @@ vi.mock('../lib/data', () => ({
 }));
 
 vi.mock('../lib/api', () => ({api:{
+  deleteItems:mocks.deleteItems,
   authStatus:async()=>({setup_required:false,session:{user:{id:'luna',email:'luna@example.test'}}}),
   locations:async()=>[{id:'shelf',name:'Shelf',parent_id:null,version:1}],
   boxes:async()=>[{id:'box',box_number:1,description:'Box 10',location_id:'shelf',capacity_l:null,version:1}],
@@ -18,6 +20,7 @@ vi.mock('../lib/api', () => ({api:{
 }}));
 let root: Root;
 let container: HTMLDivElement;
+const existingItem: InventoryRow = { id: 'existing', version: 4, name: 'Existing brackets', notes: null, tags: [], quantity: null, quantity_unit: null, quantity_approximate: false, volume_l: null, location_id: 'shelf', box_id: null, archived: false, archived_at: null, created_at: '', locations: { id: 'shelf', name: 'Shelf', parent_id: null, version: 1 }, boxes: null, item_photos: [] };
 beforeEach(async () => {
   vi.clearAllMocks();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -27,7 +30,8 @@ beforeEach(async () => {
     static createObjectURL() { return 'blob:preview'; }
     static revokeObjectURL() {}
   });
-  mocks.listItems.mockResolvedValue({ items: [], count: 0 });
+  mocks.listItems.mockResolvedValue({ items: [existingItem], count: 1 });
+  vi.stubGlobal('confirm', vi.fn().mockReturnValue(true));
   mocks.saveItem.mockImplementation(async (_item, version) => ({ id: 'new-item', version: (version ?? 0) + 1 }));
   mocks.uploadPhoto.mockImplementation(async (_id, file) => ({ id: file.name, object_path: file.name, sort_order: 0, is_cover: false }));
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -78,4 +82,30 @@ it('keeps upload errors visible after refresh and retries only failed photos on 
   expect(mocks.saveItem.mock.calls[1][1]).toBe(1);
   expect(mocks.uploadPhoto.mock.calls.map(call => call[1].name)).toEqual(['one.jpg', 'two.jpg', 'one.jpg']);
   expect(container.querySelector('.item-fields')).toBeNull();
+});
+
+it('confirms bulk deletion, prevents duplicate actions, and clears selection after success', async () => {
+  await act(() => (container.querySelector('[aria-label="Select Existing brackets"]') as HTMLInputElement).click());
+  vi.mocked(confirm).mockReturnValueOnce(false);
+  await click('Delete selected');
+  expect(mocks.deleteItems).not.toHaveBeenCalled();
+  let complete!: (value: { deleted: number; photo_cleanup_failures: string[] }) => void;
+  mocks.deleteItems.mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  await click('Delete selected');
+  expect(confirm).toHaveBeenLastCalledWith('Permanently delete 1 selected item and all their photos? This cannot be undone.');
+  expect(mocks.deleteItems).toHaveBeenCalledWith([{ id: 'existing', version: 4 }]);
+  expect((container.querySelector('[aria-label="Select Existing brackets"]') as HTMLInputElement).disabled).toBe(true);
+  expect([...container.querySelectorAll('.bulk button')].every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+  mocks.listItems.mockResolvedValue({ items: [], count: 0 });
+  await act(async () => { complete({ deleted: 1, photo_cleanup_failures: [] }); });
+  expect(container.querySelector('.bulk')).toBeNull();
+  expect(container.textContent).not.toContain('Existing brackets');
+});
+
+it('keeps selected items and displays a stale-deletion error', async () => {
+  mocks.deleteItems.mockRejectedValueOnce(new Error('This record changed elsewhere'));
+  await act(() => (container.querySelector('[aria-label="Select Existing brackets"]') as HTMLInputElement).click());
+  await click('Delete selected');
+  expect(container.textContent).toContain('This record changed elsewhere');
+  expect((container.querySelector('[aria-label="Select Existing brackets"]') as HTMLInputElement).checked).toBe(true);
 });

@@ -73,6 +73,15 @@ class MoveInput(Model):
     destination_type: Literal['box', 'location']
 
 
+class SelectedItem(Model):
+    id: str
+    version: int = Field(ge=1)
+
+
+class DeleteItemsInput(Model):
+    items: list[SelectedItem] = Field(min_length=1, max_length=500)
+
+
 class PhotoOrder(Model):
     ordered_photo_ids: list[str]
     cover_photo_id: str
@@ -362,6 +371,29 @@ def create_app(directory: Path | None = None, frontend: Path | None = None):
             require_version(db, 'items', row_id, body.expected_version)
             db.execute('UPDATE items SET archived=?,archived_at=?,version=version+1,updated_at=? WHERE id=?', (body.archived, now() if body.archived else None, now(), row_id))
             return store.item(db, row_id)
+
+    @app.post('/api/items/delete', dependencies=protected)
+    def delete_items(body: DeleteItemsInput):
+        ids = [item.id for item in body.items]
+        if len(set(ids)) != len(ids):
+            raise HTTPException(422, 'Select each item only once')
+        warnings = []
+        with store.write() as db:
+            # Validate every selection before deleting any records or touching files.
+            for item in body.items:
+                require_version(db, 'items', item.id, item.version)
+            placeholders = ','.join('?' for _ in ids)
+            paths = [row['object_path'] for row in db.execute(f'SELECT object_path FROM item_photos WHERE item_id IN({placeholders})', ids)]
+            db.execute(f'DELETE FROM items WHERE id IN({placeholders})', ids)
+            # Metadata is committed atomically, including cascading photo records.
+            # Files are removed afterward so a rollback never leaves live items without photos.
+            db.commit()
+            for path in paths:
+                try:
+                    safe_path(store.photos, path).unlink(missing_ok=True)
+                except (OSError, ValueError):
+                    warnings.append(path)
+        return {'deleted': len(ids), 'photo_cleanup_failures': warnings}
 
     @app.post('/api/moves', dependencies=protected)
     def moves(body: MoveInput):
