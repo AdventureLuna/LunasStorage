@@ -14,6 +14,7 @@ from filelock import FileLock
 from PIL import Image
 
 TABLES = ('locations', 'boxes', 'items', 'item_photos')
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def now() -> str:
@@ -21,14 +22,14 @@ def now() -> str:
 
 
 def default_data_dir() -> Path:
-    return Path(os.environ.get('INVENTORY_DATA_DIR') or
-                Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local' / 'share')) / 'LunasStorage').expanduser().resolve()
+    return Path(os.environ.get('INVENTORY_DATA_DIR') or PROJECT_ROOT / 'data').expanduser().resolve()
 
 
 def persistent_directory(directory: Path) -> Path:
     resolved = directory.expanduser().resolve()
-    if resolved.is_relative_to(Path(__file__).resolve().parent.parent):
-        raise ValueError('Choose a data directory outside the source repository and frontend build')
+    project = PROJECT_ROOT.resolve()
+    if resolved.is_relative_to(project) and not resolved.is_relative_to(project / 'data'):
+        raise ValueError('Use the project data folder or an external directory, not the source or frontend build folders')
     return resolved
 
 

@@ -211,10 +211,17 @@ def test_resumable_legacy_migration_preserves_ids_numbers_and_photo_order(env, t
                 pass
 
 
-def test_schema_migrations_foreign_keys_and_paths(tmp_path):
-    from backend.app import ROOT
-    with pytest.raises(ValueError, match='outside'):
-        Store(ROOT / 'data')
+def test_schema_migrations_foreign_keys_and_paths(tmp_path, monkeypatch):
+    from backend.store import default_data_dir
+    project = tmp_path / 'project'
+    monkeypatch.setattr('backend.store.PROJECT_ROOT', project)
+    monkeypatch.delenv('INVENTORY_DATA_DIR', raising=False)
+    assert default_data_dir() == project / 'data'
+    local = Store(default_data_dir())
+    assert local.database == project / 'data' / 'inventory.sqlite3'
+    for forbidden in [project, project / 'dist', project / 'src', project / 'backend']:
+        with pytest.raises(ValueError, match='project data folder'):
+            Store(forbidden)
     store = Store(tmp_path / 'data')
     Store(store.root)
     with store.connect() as db:

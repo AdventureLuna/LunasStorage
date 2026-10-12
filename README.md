@@ -25,7 +25,7 @@ $env:INVENTORY_DATA_DIR = 'D:\LunasStorageData'
 .\start.bat
 ```
 
-The default data directory is **`%LOCALAPPDATA%\LunasStorage`** (normally `C:\Users\julia\AppData\Local\LunasStorage`). Keep it outside this repository, `dist`, and cloud-synced folders. Environment variables can be made persistent through Windows **Edit environment variables for your account**; open a new terminal afterward. `.env.local` from the former Supabase setup is no longer used by the application. No frontend API URL or keys are needed.
+The default data directory is **`data` inside this project folder**. For example, a project at `A:\LunasStorage` stores its database at `A:\LunasStorage\data\inventory.sqlite3` and photos under `A:\LunasStorage\data\photos`. The path follows the project location rather than the terminal's working directory, so moving the project and its `data` folder to another drive keeps the inventory together. `data/` is excluded from Git. Do not place data inside `src`, `backend`, or `dist`; the server rejects those locations. `INVENTORY_DATA_DIR` remains an optional explicit override. Environment variables can be made persistent through Windows **Edit environment variables for your account**; open a new terminal afterward. `.env.local` from the former Supabase setup is no longer used by the application. No frontend API URL or keys are needed.
 
 ## Open from your phone
 
@@ -49,7 +49,7 @@ Ordinary LAN HTTP is intended for a **trusted home network**: passwords and traf
 
 ## Data, backups and restore
 
-The data folder contains `inventory.sqlite3`, its WAL/SHM files while active, `photos`, and lock files. Runtime data is not stored in source/build folders or committed to Git. Database migrations in `backend/migrations` are applied automatically, recorded with versions/checksums, and reject unsupported newer schemas.
+The project `data` folder contains `inventory.sqlite3`, its WAL/SHM files while active, `photos`, and lock files. It is persistent and excluded from Git; neither rebuilding the frontend nor running setup deletes it. Database migrations in `backend/migrations` are applied automatically, recorded with versions/checksums, and reject unsupported newer schemas.
 
 **Settings → Full local backup** downloads a ZIP containing a consistent SQLite snapshot, every referenced photo, `inventory.json`, and a checksum/photo manifest. It uses SQLite's online backup API and freezes inventory/photo writes while taking the snapshot. It is safe while the server is running. Missing referenced files fail the backup instead of silently creating an incomplete one. Active sessions are excluded; the local password hash is included. Keep backups private and copy them to another disk periodically.
 
