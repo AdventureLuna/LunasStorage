@@ -33,11 +33,11 @@ describe('photo selection regression', () => {
   it('retains every selected file after the picker is reset and React defers its update', async () => {
     function Harness() {
       const [files, setFiles] = useState<File[]>([]);
-      return <PhotoPicker files={files} disabled={false} onCamera={() => {}} onRemove={index => setFiles(current => current.filter((_, i) => i !== index))}
+      return <PhotoPicker files={files} disabled={false} onRemove={index => setFiles(current => current.filter((_, i) => i !== index))}
         onFiles={picked => startTransition(() => setFiles(current => [...current, ...picked]))}/>;
     }
     await act(() => root.render(<Harness/>));
-    const input = container.querySelector('input[type=file]') as HTMLInputElement;
+    const input = container.querySelector('input[aria-label="Choose photos from the gallery"]') as HTMLInputElement;
     let selection = [new File(['a'], 'one.jpg', { type: 'image/jpeg' }), new File(['b'], 'two.jpg', { type: 'image/jpeg' })];
     Object.defineProperty(input, 'files', { get: () => selection });
     Object.defineProperty(input, 'value', { get: () => '', set: () => { selection = []; } });

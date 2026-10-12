@@ -1,7 +1,21 @@
-# Export schema, version 1
+# Export and local backup formats
 
-The JSON object has `schema: "home-storage-inventory"`, integer `version: 1`, ISO `exported_at`, and `data` containing arrays named `locations`, `boxes`, `items`, and `item_photos`. Database UUIDs remain stable; `owner_id` values identify the exporting account and must be remapped on restore. Foreign keys retain location, box, and item relationships. Archived records are included. Photos are records with `object_path`; in the ZIP, `photo-manifest.json` maps that path to a relative `photos/…` archive path. Signed URLs are never serialized.
+The review/export JSON remains `schema: home-storage-inventory`, `version: 1`, ISO `exported_at`, and four arrays in `data`: `locations`, `boxes`, `items`, and `item_photos`. UUIDs and relationships remain stable. Photo records include `object_path`, `sort_order` and `is_cover`; URLs are never stored. Source owner IDs are retained as migration metadata but no longer select a cloud account. Box display names remain in `description`, while global `box_number` allocation is internal and transaction-safe.
 
-The CSV flattens item identity, name, derived address, tags, quantity, unit, total entry volume, notes and archive state. It is for human review and is not a restore format. Null quantity and volume values mean unknown/unrecorded.
+New exports also include `next_box_number` so imports preserve the allocator even when higher-numbered boxes were deleted. Historical JSON without that field starts above the largest retained box number. The direct downloader obtains the original Supabase counter.
 
-Restore accepts only the full ZIP, not a standalone JSON/CSV file. The local utility validates references and media, uploads staged JPEGs through the authenticated private Storage API, remaps the paths to the target account, then calls `restore_inventory`. The RPC refuses a nonempty account, preserves record/photo IDs and box numbers, prevents reuse of previously allocated target box numbers, and advances the counter. If a photo upload or the RPC fails, the utility attempts owner-scoped cleanup; after a network-ambiguous RPC failure it keeps staged photos rather than risk deleting a successfully restored photo and lists the paths for manual reconciliation.
+CSV is a flattened human-readable item list, not a restore format. Unknown quantity/volume fields remain null in JSON. Archived items and photos are included in all full exports/backups.
+
+The local full ZIP has:
+
+- `inventory.sqlite3`: SQLite online snapshot including the single local account password hash, migration versions and numbering counter; sessions are cleared.
+- `inventory.json`: the inventory in the compatible review format.
+- `photo-manifest.json`: photo IDs, object paths, ZIP archive paths and SHA-256 checksums.
+- `photos/<object_path>`: validated image bytes.
+- `local-backup.json`: format `lunas-local-backup`, version 1, database checksum and backup time.
+
+`maintenance.bat restore` verifies the local ZIP, database/JSON consistency, foreign keys, SQLite integrity and photo checksums and restores into a fresh data directory. Existing data is never overwritten. Account password hashes are portable; sessions are not.
+
+`maintenance.bat import-zip` accepts the historical Supabase ZIP (`inventory.json`, `photo-manifest.json`, actual `photos/` files), as well as the inventory portion of a local ZIP. It preserves record IDs, versions, timestamps, original owner metadata, box numbers and photo order/cover flags; the local login is created separately. It does not upload anything to Supabase. Imported photos retain safe original object paths on disk. Interrupted imports can resume the same input, and completed imports are recognized by a fingerprint.
+
+`maintenance.bat import-json` needs an equivalent manifest and local photo files supplied through `--photos-dir`. JSON-only and remote-photo-URL archives are insufficient. Every manifest path is checked against traversal/absolute paths and actual image bytes before the inventory transaction commits.

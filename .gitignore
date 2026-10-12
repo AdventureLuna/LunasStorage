@@ -8,3 +8,13 @@ dist
 exports/
 coverage
 *.tsbuildinfo
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.sqlite3*
+*.db
+*.partial
+data/
+migration-download/
+test-results/

@@ -1,14 +1,15 @@
-# Checks requiring a disposable Supabase project
+# Local deployment checks
 
-`npm test` runs the actual migration against PGlite PostgreSQL with stubs for Supabase Auth and Storage schemas. That covers migration syntax and the core SQL logic under simulated `anon` and two `authenticated` roles. It does not reproduce independent concurrent connections, Supabase Auth JWT issuance, the Storage HTTP API, or live policy behavior. Run these additional checks against a disposable project after applying the migration and creating two test accounts (never use real inventory):
+Automated checks: build frontend, run Vitest, run `python -m pytest backend/tests -q`, inspect the build for cloud endpoints, and run the local HTTP smoke check against FastAPI serving `dist` and `/api` together.
 
-1. **Number allocation:** insert several boxes concurrently as account A. Assert returned numbers are distinct, positive and form the next monotonic range. Delete one and create another; assert its number is greater, never reused. Attempt an explicit number and an update to an existing number; both must fail.
-2. **Ownership and destinations:** as anon, select/insert locations, boxes, items and photos and read/list/upload a photo; all must be denied. As account B, attempt direct selects and mutations of A's UUIDs, insert a box under A's location and insert an item with A's box/location; all must be denied. As A, test item insert with both destinations and with neither; both must fail, then test exactly one succeeds.
-3. **Location cycles:** create A→B nesting. Attempt to set A's parent to B and attempt self-parenting; both must fail. Repeat simultaneous opposite parent updates in separate sessions; owner advisory locking should prevent a cycle.
-4. **Stale writes and batch movement:** update the same item's fields from two copies using the same version; second update must affect zero rows and the UI must report a conflict. Move a mixed batch; verify all-or-none rollback if one item or destination is unavailable.
-5. **Address and quantity/volume:** store an item in Box 1, move Box 1 to another location and fetch the item again; its joined address changes. Check null quantity stays unknown, zero is out-of-stock, and volume stays the same when quantity changes.
-6. **Search and archive:** create more than 30 records with the matching term after the first page, including matches only in box description, number or location name. Search/filter; verify server-side result and pagination. Archive and restore one item and verify photos remain readable.
-7. **Photos and backups:** upload a supported image and verify only the owner's authenticated path can read it. Simulate storage failure and metadata registration failure; retry must not duplicate completed photos and an unresolved orphan must be removable. Export JSON/CSV/ZIP with >500 rows and photos; verify all pages, manifest paths and files. Restore to a separate empty disposable account and compare record counts, IDs, box numbers, relationships and photo hashes; verify restore refuses a populated account.
-8. **Pages:** build with `GITHUB_PAGES=true` and `GITHUB_REPOSITORY=owner/repo`; verify assets use `/repo/`, then open `/#/storage`, refresh, navigate and run the auth recovery redirect.
+Physical phone checklist (not equivalent to a local automated test):
 
-Record the Supabase project URL, migration commit and exact results before treating these as passed. The repository author does not claim these infrastructure checks have run without configured disposable credentials.
+1. Start the PC server and create the single account through localhost.
+2. Connect phone to the same private Wi-Fi, allow the configured TCP port on Windows Firewall for Private/Local subnet, and open the PC's LAN candidate URL.
+3. Sign in; verify 320–430px layout, sidebar swipe, folder navigation and item pages.
+4. Create a location and custom-named box, add two photos using native camera/gallery file inputs, then Save & add another and confirm the destination stays selected.
+5. Edit on PC and phone; check stale saves are rejected. Search by name, tag, box and location, move and archive/restore items.
+6. Download the full local ZIP, restore it into a new directory with the server stopped, and verify records/photos after login.
+7. Disconnect internet while keeping home LAN connected and repeat search, photo viewing and editing. No cloud endpoints/assets are needed.
+
+Do not add router port forwarding. Keep the PC awake. Distinguish checks against the local machine's LAN address from a request made by the actual phone.

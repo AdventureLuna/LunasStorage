@@ -1,60 +1,130 @@
-# LunasStorage
+# LunasStorage — local Windows inventory
 
-Private, mobile-friendly home inventory.
-React, TypeScript and Vite serve the static app; Supabase Auth, Postgres RLS and private Storage hold the live inventory. No privileged key or always-running backend is used by the browser.
+The existing React/TypeScript interface now runs entirely from your Windows PC. FastAPI serves the built frontend and `/api` on one port, SQLite holds the inventory, and a local folder holds photos. After setup and building, startup, login, editing, search, photos and backups require no internet. No Docker, Supabase server, router port forwarding or cloud hosting is needed. GitHub is used for source and CI only.
 
-## Browse and fill your storage
+## Install and start
 
-- **Inventory** is a photo-card catalog. Search by item name, notes, tags, box name or location, then narrow the results with filters. Each card links to a dedicated item page with its complete photo gallery, notes, quantity, edit, archive and move controls. Item links use `#/item/<id>` and work when opened directly on GitHub Pages after signing in.
-- **Storage** opens one location at a time. Use the breadcrumbs to move up, open sub-locations, or expand a box for **Fill this box**, **View items**, edit and delete actions. Space estimates are tucked away until needed.
-- Enter any **Box name**, such as `Box 10` or `Christmas decorations`. Existing unnamed boxes retain their original labels. The label uses the existing `boxes.description` field; `box_number` remains an internal identifier for compatibility with existing exports and restores. This update does not require a database migration.
-- The **Store in** selector remembers the last destination for your account on this browser. **Save & add another** clears the item fields and keeps that destination so you can fill a box continuously. Deleted destinations are discarded automatically.
-- Choose several gallery photos at once or add photos in successive selections. Pending photos have previews and individual remove buttons. Saving reports upload progress; successful photos are retained if another photo fails, and retries upload only the remaining files.
+Install Python **3.11 or newer** (including the Windows `py` launcher) and Node.js **22 or newer**. Open this repository in PowerShell:
 
-## Run locally
-
-1. Create a free Supabase project.
-2. Apply the migration SQL itself. In this repository, open `supabase/migrations/202609230001_initial.sql`, copy the entire file contents, paste that SQL into a new Supabase **SQL Editor** query, and click **Run**. Do not paste the filename/path as the query. Use this SQL Editor method for the current setup; the repository is not initialized for Supabase CLI migrations. This creates the tables, owner policies, private photo bucket, number allocator and atomic move RPC. If the editor reports success, continue to the next step without running the migration again.
-3. In **Authentication → Users**, create your Luna account. Then go to **Authentication → General configuration** and turn off **Allow new users to sign up**. Configure the Email provider and password recovery email as needed. The app has no registration screen; with signups disabled, only the account you created can sign in.
-4. In the repository folder, copy `.env.example` to `.env.local` (PowerShell: `Copy-Item .env.example .env.local`), then open `.env.local` in your editor. Set `VITE_SUPABASE_URL` to the project base, such as `https://your-project-ref.supabase.co`, and `VITE_SUPABASE_PUBLISHABLE_KEY` to the `sb_publishable_…` key. Do not append `/rest/v1` to the URL; that is the REST endpoint path, not the Supabase client base URL. The publishable key is designed for browsers and is safe to ship because database and Storage RLS enforce access. Never use a `service_role` or secret key here.
-5. Install dependencies and start the app. In Windows PowerShell, use `npm.cmd install` followed by `npm.cmd run dev`; `npm.cmd` avoids PowerShell's script-execution restriction on the `npm.ps1` wrapper. In other terminals, use `npm install` followed by `npm run dev`. Open the printed local URL.
-
-The app shows a configuration-required screen until both variables are present. Login is email/password; recovery uses Supabase email recovery. Under **Authentication → URL Configuration**, set the Site URL to `https://adventureluna.github.io/LunasStorage/` and add `http://localhost:5173/**` plus `https://adventureluna.github.io/LunasStorage/**` to Redirect URLs. Recovery returns to the application hash route.
-
-## Deploy on GitHub Pages
-
-The target repository is [AdventureLuna/LunasStorage](https://github.com/AdventureLuna/LunasStorage). Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The included workflow builds with `/LunasStorage/` as Vite's base for project Pages and deploys on pushes to `main`. In **Settings → Secrets and variables → Actions → Variables**, add `VITE_SUPABASE_URL` (the project base URL) and `VITE_SUPABASE_PUBLISHABLE_KEY` (the `sb_publishable_…` key). These are browser-visible public values, not secrets; never add a Supabase secret key. Saving repository variables and pushing to `main` starts a fresh build. For a user/organization root Pages site, adjust `vite.config.ts` base to `/`.
-
-Database migrations are applied separately to Supabase; deploying the static frontend does not apply SQL. The included check workflow runs typecheck, lint, tests and build.
-
-## Data and privacy notes
-
-Inventory, locations, boxes and photo metadata are owner-scoped using RLS. Storage is private; object paths are stored in Postgres and the client requests short-lived signed image URLs as needed. Two migration functions use `SECURITY DEFINER`: the box-number trigger (fixed search path, checks `auth.uid()` against the row owner, no direct execute grant) and the restore RPC (fixed search path, requires an authenticated caller, locks and checks that caller's inventory is empty, remaps owner IDs, validates staged photo ownership, and is executable only by `authenticated`). The restore-only transaction flag is set inside that RPC. Other data functions use invoker security. Location cycles and cross-owner references are constrained in Postgres. Box contents use a foreign key relationship, so changing a box's location changes the displayed address without rewriting its items.
-
-Box capacity is descriptive only. `volume_l` is an estimate for the entire entry, never per-piece multiplication or a geometric fit calculation. Null quantity means unknown; zero means out of stock. Archiving retains photos.
-
-Photo capture and gallery selection are separate controls. JPEG, PNG and WebP images are re-encoded as JPEG, orientation-corrected and resized to at most 2048 pixels on the long edge; HEIC/HEIF is rejected with a format error when the browser cannot decode it. If a network response leaves upload status uncertain, the error includes the private object path to check in Supabase Storage before retrying. Metadata registration failures trigger immediate object cleanup; if cleanup also fails, remove the reported path from the `inventory-photos` bucket after signing in to the Supabase dashboard.
-
-## Backup, exports and restore
-
-Settings exports versioned JSON, flattened CSV, and a full ZIP containing JSON, a schema note, and photo files at their relative private paths. ZIP creation reports progress and aborts without claiming completion if any photo fails. Photo files are fetched sequentially and streamed into the ZIP. Browsers with the File System Access API write directly to the save destination; other browsers use an in-memory ZIP fallback, which can run out of memory for very large backups. Exports can contain sensitive home inventory; keep them private. JSON is suitable to share with Codex for inventory review; share the ZIP if photo inspection is needed. Apply suggested edits manually in the app.
-
-See [export schema](docs/export-schema.md). Restore only into an **empty** inventory with the included local utility. Apply the migration first, set the same browser-safe Supabase variables in `.env.local`, then run `npm run restore -- storage-inventory-backup.zip`. The tool validates JSON relationships, location cycles, box numbers, the photo manifest, JPEG files and paths before sign-in. It asks for your email and reads your password without echoing it. It checks all four target tables are empty, remaps ownership and photo paths to the signed-in account, uploads photos, and calls the owner-scoped restore RPC. The RPC refuses populated inventories, preserves UUIDs and box numbers, rejects reuse of numbers already allocated on the target, advances the counter, and commits records atomically. It does not use a service or secret key. If the database restore fails, uploaded objects are removed where the response confirms rollback; if the request outcome is ambiguous or cleanup fails, the tool reports the owner paths for manual reconciliation. Do a trial restore in a separate disposable Supabase project before relying on a backup.
-
-## Phone smoke test
-
-Open the deployed URL on a phone after configuring Supabase. Sign in, add a location named “Basement shelf,” create Boxes 1 and 2, add “Ikea shelf accessories” with two photos, then search for it. Move it to Box 2 and move Box 2 to a second location; the address should follow. Add an item with only name and location, archive and restore one item, and download a ZIP backup.
-
-## Current scope and backlog
-
-Core list/add/edit basics, locations, numbered boxes, upload retries, photo viewing/reorder/cover/removal, archive, atomic selected movement, server-side search, box contents/quick add, per-box estimated volume and missing-estimate counts, item detail with photo gallery and move/archive actions, and authenticated restore are in the first pass. Backlog: scheduled backup, movement history, swipe decluttering, stock splitting and direct Codex integration. The live restore round-trip, RLS/API checks and phone workflow require a disposable Supabase project and test account.
-
-## Commands
-
-```sh
-npm run dev
-npm run typecheck
-npm run lint
-npm test
-npm run build
+```powershell
+.\setup.bat
+.\start.bat
 ```
+
+`setup.bat` needs internet once: it creates `.venv`, installs the Python requirements, runs `npm.cmd ci`, and builds `dist`. Run it again after updating source or dependencies. `start.bat` uses the existing virtual environment and build; it never installs packages or rebuilds. It listens on `0.0.0.0:8000` and prints the PC URL and likely LAN candidates. Only one server may use a given data directory.
+
+Open **http://localhost:8000** on the PC and create your username and password. This is a single local account, shared by the PC and phone. First-run account creation is allowed only from the PC loopback connection, not from the LAN. There is no public registration. Passwords are hashed with scrypt; login uses expiring, HttpOnly server-side session cookies. Signing out revokes that session. API and photos require login.
+
+Keep the terminal running. Stop with **Ctrl+C**; if Windows asks whether to terminate the batch job, choose **Y**. To start again, run `start.bat`. The PC must remain awake and connected to the network; configure Windows sleep settings accordingly.
+
+Optional configuration, set before running the launcher:
+
+```powershell
+$env:INVENTORY_PORT = '8000'
+$env:INVENTORY_DATA_DIR = 'D:\LunasStorageData'
+.\start.bat
+```
+
+The default data directory is **`%LOCALAPPDATA%\LunasStorage`** (normally `C:\Users\julia\AppData\Local\LunasStorage`). Keep it outside this repository, `dist`, and cloud-synced folders. Environment variables can be made persistent through Windows **Edit environment variables for your account**; open a new terminal afterward. `.env.local` from the former Supabase setup is no longer used by the application. No frontend API URL or keys are needed.
+
+## Open from your phone
+
+1. Connect the phone to the same home Wi-Fi/network as the PC. A guest Wi-Fi that isolates devices will not work.
+2. Run `start.bat`. On the phone, open a printed LAN candidate, such as **`http://192.168.1.25:8000`**, and sign in. Phone `localhost` means the phone itself, so use the PC address.
+3. If multiple candidates are printed, use `ipconfig` on the PC and choose the IPv4 address of the Wi-Fi/Ethernet adapter on the phone's network. VPN/virtual adapter addresses may not work.
+4. Set Windows network profile to **Private**. If Windows asks about Python network access, allow it on **Private networks**. Alternatively, add an inbound Windows Defender Firewall rule for TCP port 8000, **Private** profile, with remote scope **Local subnet**. If you change the port, update the rule. Do not disable the firewall.
+5. Reserve that PC's IPv4 address for its network adapter in your router's **DHCP reservation/address reservation** settings. This keeps the bookmarked phone URL stable.
+
+Ordinary LAN HTTP is intended for a **trusted home network**: passwords and traffic are not encrypted in transit. Do not expose the server on the internet or use port forwarding. Camera capture is a file input with `capture="environment"`; phones may open their native camera or a chooser depending on the browser. Gallery multi-selection remains available. There is no embedded preview that requires HTTPS. Use JPEG, PNG or WebP; convert unsupported HEIC/HEIF photos first.
+
+## Your inventory
+
+- **Inventory** is a photo-card catalog with search across names, notes, tags, box names/numbers and locations. Search words match together; quoted phrases are supported. Filters narrow by location, box, tag, archive state and out-of-stock quantity. An item has its own hash-route page with its photo gallery, notes, quantities, edit, move and archive controls. Refreshing a page works on the local server.
+- **Storage** shows one location at a time with breadcrumbs. Locations can have parents. Open a box for Fill this box, View items, Edit or Delete. Nonempty locations/boxes must be emptied before deletion.
+- Box numbers are allocated globally in a transaction and never reused after deletion. Custom box labels such as **Box 10** or **Christmas decorations** remain supported through the existing description field. Numbered identity and display name are distinct. Imported actual `box_number` values are preserved and advance the allocator.
+- **Store in** remembers the last valid destination per account in that browser. **Save & add another** clears item fields while keeping the box selected.
+- Multiple selected photos have previews and individual remove controls. Successful uploads stay saved if another fails. Stable client IDs make item creation and photo retries idempotent after uncertain network responses. Photos are validated and resized/oriented as JPEG by the backend as well as compressed by capable browsers.
+- Unknown quantities remain null; zero means out of stock. Groups can be recorded as a single item with quantity/unit. Volume is an estimate for the whole entry. Archive/restore keeps photos and relationships.
+- Version checks reject stale edits from the other device. Moves validate the entire selection and commit atomically. SQLite foreign keys are enabled on every connection, connections are short-lived per operation, and writes use transactions plus a cross-process file lock. SQLite runs in WAL mode.
+
+## Data, backups and restore
+
+The data folder contains `inventory.sqlite3`, its WAL/SHM files while active, `photos`, and lock files. Runtime data is not stored in source/build folders or committed to Git. Database migrations in `backend/migrations` are applied automatically, recorded with versions/checksums, and reject unsupported newer schemas.
+
+**Settings → Full local backup** downloads a ZIP containing a consistent SQLite snapshot, every referenced photo, `inventory.json`, and a checksum/photo manifest. It uses SQLite's online backup API and freezes inventory/photo writes while taking the snapshot. It is safe while the server is running. Missing referenced files fail the backup instead of silently creating an incomplete one. Active sessions are excluded; the local password hash is included. Keep backups private and copy them to another disk periodically.
+
+The same backup is available from PowerShell while the server is running:
+
+```powershell
+.\maintenance.bat backup "$env:USERPROFILE\Documents\LunasStorage-backup.zip"
+.\maintenance.bat verify
+```
+
+Choose a new output filename each time. JSON/CSV downloads remain useful for review; JSON alone is not a full photo backup. Do not copy only `inventory.sqlite3` while the server is active, because WAL may contain newer data. With the server fully stopped, copying the complete data directory is also valid.
+
+Restore a local ZIP into a **new empty directory** with the server stopped. Existing inventories are never overwritten:
+
+```powershell
+.\maintenance.bat --data-dir 'D:\LunasStorage-restored' restore "$env:USERPROFILE\Documents\LunasStorage-backup.zip"
+$env:INVENTORY_DATA_DIR = 'D:\LunasStorage-restored'
+.\start.bat
+```
+
+Restore validates checksums, SQLite integrity, foreign keys, inventory JSON equality and all photos before promoting the database. The original data folder remains available. A interrupted restore can be repeated with the same ZIP and destination. Log in with the backed-up local username/password; session cookies are not restored.
+
+`maintenance.bat verify` reports record counts, integrity, missing photos and unused/orphan files. `verify --cleanup` removes only unreferenced photo files under the data directory. Do not use cleanup while an interrupted import is waiting to resume; the staged files are intentionally reused on retry.
+
+Forgotten local password: stop the server, run **`maintenance.bat reset-password`**, enter the new password twice in the terminal, then restart. This preserves inventory and revokes all sessions. No email service is required.
+
+## One-time migration from Supabase
+
+The old schema/export format was inspected. IDs, box numbers, names/descriptions, quantities, tags, timestamps, versions, archive state, relations, source owner metadata, photo IDs/order/cover flags and actual photo bytes are preserved. Supabase data is **read only** and never deleted or modified. The historical SQL under `supabase/migrations` is retained as a reference; do not apply it for the local server.
+
+**Preferred: use the existing full ZIP export.** Stop the local server and import into an empty local inventory (an already-created local login is fine):
+
+```powershell
+.\maintenance.bat import-zip 'C:\Users\julia\Downloads\storage-inventory-backup.zip'
+.\maintenance.bat verify
+.\start.bat
+```
+
+The ZIP needs `inventory.json`, `photo-manifest.json`, and every file at its manifest path under `photos/`. Records are committed as one transaction only after all photo files validate/copy successfully. Interruptions leave reusable staged files, not partial records. Retry with the same input; a completed import is recognized and not duplicated. Different imports refuse to merge into a populated inventory. Create your new local account at localhost if you imported before first-run setup.
+
+The original ZIP did not export the numbering counter, so its importer starts above the highest retained box number. The direct Supabase downloader also reads the original counter, preserving numbers allocated to boxes that were later deleted. New local JSON exports include `next_box_number`, and local SQLite backups preserve the counter exactly.
+
+**If no full ZIP is available, download records and photos from Supabase.** Pause edits to the old app during downloading. You need:
+
+- the project base URL, e.g. `https://your-project.supabase.co`;
+- your exporting account's UUID (`owner_id`, visible in Supabase Auth → Users);
+- either a locally held service-role/secret key with read access, **or** the publishable/anon key plus a valid owner's access token in `MIGRATION_SUPABASE_TOKEN`.
+
+These values are used only by the local migration utility. Enter them in the terminal environment; do not put privileged keys into the frontend, Git, or command-line arguments. Example:
+
+```powershell
+$env:MIGRATION_SUPABASE_URL = 'https://your-project.supabase.co'
+$migrationKey = Read-Host 'Migration key' -AsSecureString
+$env:MIGRATION_SUPABASE_KEY = [System.Net.NetworkCredential]::new('', $migrationKey).Password
+.\maintenance.bat download-supabase --owner-id 'YOUR-ACCOUNT-UUID' --output 'D:\LunasMigration'
+.\maintenance.bat import-json 'D:\LunasMigration\inventory.json' --photos-dir 'D:\LunasMigration'
+.\maintenance.bat verify
+Remove-Item Env:MIGRATION_SUPABASE_KEY
+```
+
+With a publishable key, also supply `MIGRATION_SUPABASE_TOKEN` securely and clear it afterward. The downloader paginates every table, freezes a local metadata snapshot, downloads private photo objects, records checksums, and writes `migration-report.json`. Retry the same output directory to resume missing photo downloads. It reuses checksum-verified files and checks whether the source records changed. If the source changed, pause edits and use a new download directory. Access errors and missing photos are reported; the importer refuses an incomplete archive. Internet is needed only for this one-time download.
+
+A standalone JSON export also works with a matching `photo-manifest.json` and photo files in the directory given by `--photos-dir`. Remote URLs alone are not sufficient. If the old project is inaccessible, obtain a full ZIP or the credentials/account UUID described above; the tooling cannot recover photo bytes without one of those inputs.
+
+## Development and checks
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd test
+npm.cmd run build
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+```
+
+For frontend development run the local backend with `start.bat`, then `npm.cmd run dev` in another terminal. Vite proxies `/api` to `127.0.0.1:8000` (or the `INVENTORY_PORT` environment value). Production always serves frontend/API from the same port and uses relative `/api` URLs. `npm.cmd` avoids PowerShell's execution restriction on the npm.ps1 wrapper.
+
+CI runs frontend checks/build and backend tests. Tests cover login/session protection, numbering under simultaneous requests, stale edits, search, moves, archiving, photos, SQLite migrations, resumable legacy imports and backup/restore. Automated local HTTP tests are distinct from trying the app on your physical phone; adapter choice, firewall, Wi-Fi isolation and native camera behavior require your actual LAN device.

@@ -5,22 +5,17 @@ import App from './App';
 
 const mocks = vi.hoisted(() => ({ saveItem: vi.fn(), uploadPhoto: vi.fn(), listItems: vi.fn() }));
 vi.mock('../lib/data', () => ({
-  configured: true,
   ...mocks,
-  client: () => ({
-    auth: {
-      getSession: async () => ({ data: { session: { user: { id: 'luna', email: 'luna@example.test' } } } }),
-      onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
-    },
-    from: (table: string) => ({ select: () => ({ order: async () => ({ error: null, data: table === 'locations'
-      ? [{ id: 'shelf', name: 'Shelf', parent_id: null, version: 1 }]
-      : [{ id: 'box', box_number: 1, description: 'Box 10', location_id: 'shelf', capacity_l: null, version: 1 }] }) }) }),
-    rpc: async () => ({ data: [], error: null }),
-  }),
   address: () => '',
   exportRows: vi.fn(), exportZip: vi.fn(), photoUrl: vi.fn(), setPhotoOrder: vi.fn(), removePhotoRecord: vi.fn(),
 }));
 
+vi.mock('../lib/api', () => ({api:{
+  authStatus:async()=>({setup_required:false,session:{user:{id:'luna',email:'luna@example.test'}}}),
+  locations:async()=>[{id:'shelf',name:'Shelf',parent_id:null,version:1}],
+  boxes:async()=>[{id:'box',box_number:1,description:'Box 10',location_id:'shelf',capacity_l:null,version:1}],
+  estimates:async()=>[],
+}}));
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(async () => {
@@ -54,7 +49,7 @@ async function prepareItem() {
   });
   const destination = container.querySelector('.item-fields select') as HTMLSelectElement;
   await act(() => { destination.value = 'b:box'; destination.dispatchEvent(new Event('change', { bubbles: true })); });
-  const input = container.querySelector('input[type=file]') as HTMLInputElement;
+  const input = container.querySelector('input[aria-label="Choose photos from the gallery"]') as HTMLInputElement;
   let files = [new File(['a'], 'one.jpg', { type: 'image/jpeg' }), new File(['b'], 'two.jpg', { type: 'image/jpeg' })];
   Object.defineProperty(input, 'files', { get: () => files });
   Object.defineProperty(input, 'value', { get: () => '', set: () => { files = []; } });

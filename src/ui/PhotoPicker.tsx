@@ -6,15 +6,20 @@ type Props = {
   disabled: boolean;
   onFiles: (files: File[]) => void;
   onRemove: (index: number) => void;
-  onCamera: () => void;
 };
 
-export function PhotoPicker({ files, disabled, onFiles, onRemove, onCamera }: Props) {
+export function PhotoPicker({ files, disabled, onFiles, onRemove }: Props) {
   return <section aria-label="Add photos">
     <div className="upload-options">
-      <button type="button" disabled={disabled} className="upload-card" onClick={onCamera}>
+      <label className="upload-card">
         <Camera/><span><strong>Take a photo</strong><small>Use the rear camera</small></span>
-      </button>
+        <input aria-label="Take a photo with the camera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={disabled}
+          onChange={event => {
+            const picked = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = '';
+            if (picked.length) onFiles(picked);
+          }}/>
+      </label>
       <label className="upload-card">
         <ImagePlus/><span><strong>Choose photos</strong><small>Select several at once</small></span>
         <input aria-label="Choose photos from the gallery" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={disabled}
